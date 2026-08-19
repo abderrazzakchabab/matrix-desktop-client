@@ -2,7 +2,7 @@
 name = "matrix-desktop-client"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.92"
 description = "A native desktop Matrix messaging client (a comfortable chat seat), built on matrix-rust-sdk and egui."
 license = "MIT OR Apache-2.0"
 
