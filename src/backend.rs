@@ -38,6 +38,10 @@ pub struct AuthResult {
     /// For fresh logins: the session data that should be persisted to disk.
     /// `None` when the session was restored from disk.
     pub persisted: Option<PersistedSession>,
+    /// The account password entered at login, used only for password-based
+    /// UIA during first-run cross-signing bootstrap. `Some` for a fresh login,
+    /// `None` when the session was restored from disk (no password known).
+    pub account_password: Option<String>,
 }
 
 /// Events produced by background tasks (sync loop, crypto bootstrap) and
@@ -112,6 +116,7 @@ pub async fn login(
         device_id: response.device_id.to_string(),
         homeserver,
         persisted: Some(persisted),
+        account_password: Some(password),
     })
 }
 
@@ -146,6 +151,7 @@ pub async fn restore(persisted: PersistedSession) -> Result<AuthResult, String> 
         device_id,
         homeserver: persisted.homeserver.clone(),
         persisted: None,
+        account_password: None,
     })
 }
 

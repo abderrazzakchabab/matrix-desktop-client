@@ -185,9 +185,9 @@ impl MatrixApp {
 
                 // First-run encryption setup (fresh login only — we hold the
                 // password). Non-fatal: failures surface as a status message.
-                if let Some(persisted) = &auth.persisted {
+                if let Some(password) = &auth.account_password {
                     let client = auth.client.clone();
-                    let password = persisted.passphrase.clone();
+                    let password = password.clone();
                     let tx = self.events_tx.clone();
                     let sync_shutdown = shutdown.clone();
                     tokio::spawn(async move {
