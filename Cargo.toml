@@ -1,0 +1,62 @@
+[package]
+name = "matrix-desktop-client"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "A native desktop Matrix messaging client (a comfortable chat seat), built on matrix-rust-sdk and egui."
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# UI shell: egui via eframe with the lightweight glow (OpenGL) renderer.
+# Default features are trimmed: no wgpu (heavy compile, needs Vulkan/Metal/DX12 at runtime),
+# no accesskit/web-reader. `winit/default` gives us X11 + Wayland + macOS windowing.
+eframe = { version = "0.35", default-features = false, features = [
+    "glow",
+    "default_fonts",
+    "wayland",
+    "x11",
+] }
+
+# Matrix protocol + E2EE. Default features already enable `e2e-encryption`,
+# `automatic-room-key-forwarding` and the sqlite store; we add `bundled-sqlite`
+# so no system SQLite dev package is needed on Linux/macOS CI.
+matrix-sdk = { version = "0.18", features = ["bundled-sqlite"] }
+
+# High-level timeline + room list helpers (drives the sync loop + event cache).
+matrix-sdk-ui = "0.18"
+
+# Observable vector + diffs used by matrix-sdk-ui timelines. Must match the
+# version matrix-sdk-ui uses (eyeball-im 0.8 / imbl 6) so `VectorDiff` types
+# line up.
+eyeball-im = "0.8"
+
+# Bridge egui (sync UI loop) with the async matrix-sdk runtime.
+poll-promise = { version = "0.3", features = ["tokio"] }
+
+# Async runtime. `#[tokio::main]` keeps the UI thread inside the runtime context,
+# so `Promise::spawn_async` / `tokio::spawn` work directly from the egui loop.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+futures-util = "0.3"
+
+# Session persistence (tokens live in the user config dir, never in git).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+
+# Human-readable timestamps for the timeline.
+chrono = "0.4"
+
+# URL parsing for homeserver validation.
+url = "2"
+
+# Logging. matrix-sdk and egui both speak `tracing`.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+lto = "thin"
+strip = true
+
+[profile.dev]
+# Faster incremental builds for the dev loop.
+opt-level = 1
