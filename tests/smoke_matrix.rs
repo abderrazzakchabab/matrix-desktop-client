@@ -13,6 +13,10 @@
 //! It validates the full MVP loop through the app's own `backend` module:
 //! login → sync → room creation → timeline → send → message appears.
 
+// This integration test is its own crate, so it needs the recursion-limit bump
+// the lib does (matrix-sdk crypto types overflow at the default 128).
+#![recursion_limit = "256"]
+
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -51,6 +55,130 @@ fn message_body(item: &TimelineItem) -> Option<String> {
         MessageType::Text(text) => Some(text.body.clone()),
         _ => None,
     }
+}
+
+/// Register a fresh throwaway account and log in through the app backend.
+/// Returns `(AuthResult, registration Client, password)`.
+async fn register_and_login() -> (
+    backend::AuthResult,
+    matrix_sdk::Client,
+    String,
+    String,
+) {
+    let homeserver = homeserver();
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let username = format!("mdc-verify-{stamp}");
+    let password = format!("hunter2-{stamp}-pass");
+
+    let client = Client::builder()
+        .homeserver_url(&homeserver)
+        .build()
+        .await
+        .expect("client build");
+    let mut request = RegisterRequest::new();
+    request.username = Some(username.clone());
+    request.password = Some(password.clone());
+    request.initial_device_display_name = Some("mdc-smoke".to_owned());
+
+    let register = async {
+        match client.matrix_auth().register(request.clone()).await {
+            Ok(_) => Ok(()),
+            // Complete Synapse's dummy UIA stage if it requires one.
+            Err(e) if matches!(e.as_ruma_api_error(), Some(UiaaResponse::AuthResponse(_))) => {
+                let session = match e.as_ruma_api_error() {
+                    Some(UiaaResponse::AuthResponse(info)) => info.session.clone(),
+                    _ => None,
+                };
+                let mut retry = request.clone();
+                let mut dummy = Dummy::new();
+                dummy.session = session;
+                retry.auth = Some(AuthData::Dummy(dummy));
+                client.matrix_auth().register(retry).await.map(|_| ())
+            }
+            Err(other) => Err(other),
+        }
+    };
+    register.await.expect("registration");
+
+    let auth = backend::login(homeserver, username.clone(), password.clone())
+        .await
+        .expect("login");
+    (auth, client, username, password)
+}
+
+/// Cross-signing bootstrap: the freshly-logged-in client must be able to
+/// bootstrap cross-signing using password-based UIA (the app forwards the real
+/// login password), and afterwards its own identity must be reported as
+/// verified by `check_verification`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires network access and registers a throwaway account"]
+async fn cross_signing_bootstrap_verifies_identity() {
+    let (auth, client, _username, password) = register_and_login().await;
+
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let (events_tx, mut events_rx) = mpsc::channel(32);
+    let sync_task = backend::start_sync(auth.client.clone(), shutdown.clone(), events_tx.clone());
+
+    // Let the first sync populate identities before bootstrapping.
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
+    backend::bootstrap_crypto(auth.client.clone(), password.clone(), events_tx.clone()).await;
+
+    // Wait for the bootstrap result status.
+    let mut bootstrap_seen = false;
+    for _ in 0..40 {
+        while let Ok(event) = events_rx.try_recv() {
+            if let backend::BackendEvent::Crypto(msg) = event {
+                if msg.contains("Cross-signing is set up") {
+                    bootstrap_seen = true;
+                } else {
+                    eprintln!("[bootstrap] status: {msg}");
+                }
+            }
+        }
+        if bootstrap_seen {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    assert!(
+        bootstrap_seen,
+        "cross-signing bootstrap did not report success"
+    );
+
+    // Now the app's verification check must report our own identity verified.
+    backend::check_verification(auth.client.clone(), events_tx.clone()).await;
+
+    let mut verified = None;
+    for _ in 0..40 {
+        while let Ok(event) = events_rx.try_recv() {
+            if let backend::BackendEvent::Verification(v) = event {
+                verified = Some(v);
+            }
+        }
+        if verified.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    assert_eq!(verified, Some(true), "own cross-signing identity should be verified");
+
+    shutdown.store(true, Ordering::Relaxed);
+    sync_task.abort();
+    drop(auth);
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        client.matrix_auth().logout(),
+    )
+    .await;
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        client.account().deactivate(None, None, true),
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
