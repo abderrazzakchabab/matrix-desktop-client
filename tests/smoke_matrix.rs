@@ -59,12 +59,7 @@ fn message_body(item: &TimelineItem) -> Option<String> {
 
 /// Register a fresh throwaway account and log in through the app backend.
 /// Returns `(AuthResult, registration Client, password)`.
-async fn register_and_login() -> (
-    backend::AuthResult,
-    matrix_sdk::Client,
-    String,
-    String,
-) {
+async fn register_and_login() -> (backend::AuthResult, matrix_sdk::Client, String, String) {
     let homeserver = homeserver();
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -164,7 +159,11 @@ async fn cross_signing_bootstrap_verifies_identity() {
         }
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
-    assert_eq!(verified, Some(true), "own cross-signing identity should be verified");
+    assert_eq!(
+        verified,
+        Some(true),
+        "own cross-signing identity should be verified"
+    );
 
     shutdown.store(true, Ordering::Relaxed);
     sync_task.abort();
