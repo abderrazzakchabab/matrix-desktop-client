@@ -1,4 +1,19 @@
+# Build artifacts
 /target
-Cargo.lock
+
+# Local secret state — never commit credentials or session data.
+# The app stores its state in the user's config dir (~/.config/...), but keep
+# this ignore rule so any stray local copies can't be committed either.
 *.local
+*.key
+*.pem
+session.json
+
+# no-mistakes license keys
 /license_keys
+
+# Editor/OS noise
+.DS_Store
+*.swp
+.idea/
+.vscode/
